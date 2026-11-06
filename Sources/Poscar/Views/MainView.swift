@@ -6,6 +6,8 @@ struct MainView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @AppStorage("sidebarWidth") private var sidebarWidth = 240.0
+    /// Height of title bar plus toolbar, read from the window: SwiftUI reports 0 for it here.
+    @State private var titlebarHeight: CGFloat = 52
 
     var body: some View {
         // A plain split instead of NavigationSplitView, whose sidebar floats on macOS 26. The toolbar
@@ -20,15 +22,18 @@ struct MainView: View {
             }
             ContentArea()
         }
-        .background { WindowBackdrop(sidebarWidth: model.sidebarVisible ? sidebarWidth : 0) }
+        .background {
+            WindowBackdrop(sidebarWidth: model.sidebarVisible ? sidebarWidth : 0, toolbarHeight: titlebarHeight)
+        }
         .animation(.easeOut(duration: 0.18), value: model.sidebarVisible)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .navigationTitle(model.mailboxTitle)
         .hidingWindowTitle()
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                ToolbarLeading(sidebarWidth: model.sidebarVisible ? sidebarWidth : 0, title: model.mailboxTitle)
+                CommandButton(command: .toggleSidebar, icon: "sidebar.left", showTitle: false, bordered: false)
             }
+            titleItem
             // Without the system title nothing pushes these right, so a flexible space does.
             ToolbarItemGroup(placement: .automatic) {
                 Spacer()
@@ -50,9 +55,65 @@ struct MainView: View {
             }
         }
         .animation(.easeOut(duration: 0.12), value: model.overlay)
-        .background(WindowAccessor { window in model.mainWindow = window })
+        .background(WindowAccessor { window in
+            model.mainWindow = window
+            let height = window.frame.height - window.contentLayoutRect.height
+            if height > 0, abs(height - titlebarHeight) > 0.5 {
+                DispatchQueue.main.async { titlebarHeight = height }
+            }
+        })
         .onAppear {
             model.openMainWindow = { openWindow(id: "main") }
+        }
+    }
+}
+
+extension MainView {
+    /// The folder title as its own toolbar item, so macOS 26 doesn't put it in the sidebar button's
+    /// glass capsule; it is shifted to line up with the content below.
+    @ToolbarContentBuilder
+    var titleItem: some ToolbarContent {
+        if #available(macOS 26, *) {
+            ToolbarItem(placement: .navigation) {
+                ToolbarTitle(title: model.mailboxTitle, sidebarWidth: model.sidebarVisible ? sidebarWidth : 0)
+            }
+            .sharedBackgroundVisibility(.hidden)
+        } else if #available(macOS 15, *) {
+            ToolbarItem(placement: .navigation) {
+                ToolbarTitle(title: model.mailboxTitle, sidebarWidth: model.sidebarVisible ? sidebarWidth : 0)
+            }
+        }
+    }
+}
+
+private struct ToolbarTitle: View {
+    let title: String
+    let sidebarWidth: CGFloat
+    @State private var originX: CGFloat?
+
+    var body: some View {
+        Text(title)
+            .font(.headline)
+            .lineLimit(1)
+            .padding(.leading, leadingPadding)
+            .background(GeometryReader { geometry in
+                let x = geometry.frame(in: .global).minX
+                Color.clear
+                    .onAppear { record(x) }
+                    .onChange(of: x) { _, newX in record(newX) }
+            })
+    }
+
+    /// Pushes the title to where the content starts: past the sidebar plus the list margin.
+    private var leadingPadding: CGFloat {
+        guard let originX, sidebarWidth > 0 else { return 0 }
+        return max(0, sidebarWidth + ThreadListView.margin - originX)
+    }
+
+    /// Toolbar layout must not change state mid-update, so the measured origin is stored afterwards.
+    private func record(_ x: CGFloat) {
+        DispatchQueue.main.async {
+            if originX.map({ abs($0 - x) > 0.5 }) ?? true { originX = x }
         }
     }
 }
@@ -60,16 +121,15 @@ struct MainView: View {
 /// Both column colours reaching under the transparent toolbar, plus the line below the content's bar.
 private struct WindowBackdrop: View {
     let sidebarWidth: CGFloat
+    let toolbarHeight: CGFloat
 
     var body: some View {
-        GeometryReader { geometry in
-            HStack(spacing: 0) {
-                Theme.sidebarTop.frame(width: sidebarWidth)
-                VStack(spacing: 0) {
-                    Theme.barTop.frame(height: geometry.safeAreaInsets.top)
-                    Rectangle().fill(Theme.hairline).frame(height: 0.5)
-                    Theme.canvas
-                }
+        HStack(spacing: 0) {
+            Theme.sidebarTop.frame(width: sidebarWidth)
+            VStack(spacing: 0) {
+                Theme.barTop.frame(height: toolbarHeight)
+                Rectangle().fill(Theme.hairline).frame(height: 0.5)
+                Theme.canvas
             }
         }
         .ignoresSafeArea()
@@ -105,38 +165,6 @@ private struct SidebarResizeHandle: View {
                             .onEnded { _ in startWidth = nil }
                     )
             }
-    }
-}
-
-/// Sidebar toggle over the sidebar, then the folder title lined up with the content below it.
-private struct ToolbarLeading: View {
-    let sidebarWidth: CGFloat
-    let title: String
-    @State private var originX: CGFloat = 80
-
-    var body: some View {
-        HStack(spacing: 0) {
-            CommandButton(command: .toggleSidebar, icon: "sidebar.left", showTitle: false, bordered: false)
-                .frame(width: max(84, sidebarWidth + ThreadListView.margin - originX), alignment: .leading)
-            if #available(macOS 15, *) {
-                Text(title)
-                    .font(.headline)
-                    .lineLimit(1)
-            }
-        }
-        .background(GeometryReader { geometry in
-            let x = geometry.frame(in: .global).minX
-            Color.clear
-                .onAppear { record(x) }
-                .onChange(of: x) { _, newX in record(newX) }
-        })
-    }
-
-    /// Toolbar layout must not change state mid-update, so the measured origin is stored afterwards.
-    private func record(_ x: CGFloat) {
-        DispatchQueue.main.async {
-            if abs(originX - x) > 0.5 { originX = x }
-        }
     }
 }
 
