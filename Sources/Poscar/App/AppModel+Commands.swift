@@ -144,7 +144,11 @@ extension AppModel {
         let mailboxKind = mailbox.kind
         let removes = action.removesThread(from: mailboxKind) && !showingScheduled
 
-        if removes { selectNeighbor(excluding: Set(targets.map(\.id))) }
+        if removes {
+            // Leaving a conversation that just went away returns to its folder's list, not the next thread.
+            if focus == .reader { closeThread() }
+            selectNeighbor(excluding: Set(targets.map(\.id)))
+        }
         checked = []
 
         let foldersByAccount = folders
