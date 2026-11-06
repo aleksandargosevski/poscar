@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+env:
+  TAP_REPOSITORY: aleksandargosevski/homebrew-tap
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Read version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag must look like v1.2.3, got $GITHUB_REF_NAME"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Import signing certificate
+        env:
+          POSCAR_CERT_P12_BASE64: ${{ secrets.POSCAR_CERT_P12_BASE64 }}
+          POSCAR_CERT_PASSWORD: ${{ secrets.POSCAR_CERT_PASSWORD }}
+        run: |
+          if [[ -z "$POSCAR_CERT_P12_BASE64" || -z "$POSCAR_CERT_PASSWORD" ]]; then
+            echo "::error::POSCAR_CERT_P12_BASE64 and POSCAR_CERT_PASSWORD secrets are required"
+            exit 1
+          fi
+
+          KEYCHAIN="$RUNNER_TEMP/poscar-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          CERT="$RUNNER_TEMP/poscar-dev.p12"
+
+          echo "$POSCAR_CERT_P12_BASE64" | base64 --decode > "$CERT"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT" -k "$KEYCHAIN" -P "$POSCAR_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$CERT"
+
+          echo "KEYCHAIN=$KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: ./scripts/test.sh
+
+      - name: Build
+        env:
+          POSCAR_GOOGLE_CLIENT_ID: ${{ secrets.POSCAR_GOOGLE_CLIENT_ID }}
+          POSCAR_GOOGLE_CLIENT_SECRET: ${{ secrets.POSCAR_GOOGLE_CLIENT_SECRET }}
+        run: |
+          if [[ -z "$POSCAR_GOOGLE_CLIENT_ID" || -z "$POSCAR_GOOGLE_CLIENT_SECRET" ]]; then
+            echo "::error::POSCAR_GOOGLE_CLIENT_ID and POSCAR_GOOGLE_CLIENT_SECRET secrets are required"
+            exit 1
+          fi
+          POSCAR_VERSION="$VERSION" ./scripts/build.sh --zip
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "build/Poscar-$VERSION.zip" \
+            --title "Poscar $VERSION" \
+            --generate-notes
+
+      - name: Update Homebrew formula
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [[ -z "$HOMEBREW_TAP_TOKEN" ]]; then
+            echo "::error::HOMEBREW_TAP_TOKEN secret is required"
+            exit 1
+          fi
+
+          SHA256="$(shasum -a 256 "build/Poscar-$VERSION.zip" | cut -d ' ' -f 1)"
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${TAP_REPOSITORY}.git" "$RUNNER_TEMP/tap"
+
+          # Formulae live in the tap's root, next to the GoReleaser ones. Homebrew ignores the root
+          # as soon as a Formula/ directory exists, so none must be created.
+          ./scripts/render-formula.sh "$VERSION" "$SHA256" > "$RUNNER_TEMP/tap/poscar.rb"
+
+          cd "$RUNNER_TEMP/tap"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -q --ignore-unmatch Formula/poscar.rb
+          git add poscar.rb
+          git commit -m "poscar $VERSION"
+          git push origin HEAD
+
+      - name: Remove signing keychain
+        if: always()
+        run: |
+          if [[ -n "${KEYCHAIN:-}" ]]; then
+            security delete-keychain "$KEYCHAIN" || true
+          fi
