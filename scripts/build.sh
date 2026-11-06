@@ -70,6 +70,10 @@ BUNDLE_ID="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST")"
 xattr -cr "$APP"
 codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID" "$APP"
 codesign --verify --strict "$APP"
+# Keep the build copy out of Launch Services, so notifications and the Dock take name and icon
+# from the installed app rather than from whichever copy macOS saw first.
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+"$LSREGISTER" -u "$APP" >/dev/null 2>&1 || true
 echo "Built $APP"
 
 if $ZIP; then

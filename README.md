@@ -1,4 +1,8 @@
-# Pošćar
+<p align="center">
+  <img src="Resources/AppIconSource.png" width="160" alt="Pošćar icon: Žuća the postman">
+</p>
+
+<h1 align="center">Pošćar</h1>
 
 A fast, keyboard-first mail app for macOS. On disk, in Homebrew and in paths it is plain `Poscar`. Gmail shortcuts by default, and every button shows its
 shortcut, Raycast style. Works with Gmail and any IMAP server, with all accounts in one inbox.

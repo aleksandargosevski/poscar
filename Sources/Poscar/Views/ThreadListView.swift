@@ -222,7 +222,7 @@ struct DateGroup {
 }
 
 struct ThreadRow: View {
-    /// Same space before the avatar (where the unread dot sits) as after the date.
+    /// Same space before the avatar as after the date.
     static let inset: CGFloat = 14
 
     @Environment(AppModel.self) private var model
@@ -233,11 +233,6 @@ struct ThreadRow: View {
     var body: some View {
         let latest = thread.latest
         HStack(spacing: 0) {
-            // The unread dot lives inside the row, so the row's left edge lines up with the search field.
-            // A fixed spacer holds it: a frame around an empty view would collapse to nothing.
-            Color.clear
-                .frame(width: ThreadRow.inset, height: 1)
-                .overlay { indicator }
             HStack(spacing: 14) {
                 Avatar(name: avatarAddress.name, email: avatarAddress.email, size: 30, outline: avatarColor)
                 HStack(spacing: 6) {
@@ -274,8 +269,14 @@ struct ThreadRow: View {
                     .monospacedDigit()
                     .frame(minWidth: 60, alignment: .trailing)
             }
-            .padding(.trailing, ThreadRow.inset)
+            .padding(.horizontal, ThreadRow.inset)
             .frame(height: 54)
+        }
+        // The unread dot sits in the list margin, left of the row, as in Newton.
+        .overlay(alignment: .leading) {
+            indicator
+                .frame(width: 16)
+                .offset(x: -20)
         }
         .background(
             RoundedRectangle(cornerRadius: 8)
