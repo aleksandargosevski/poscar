@@ -170,6 +170,9 @@ final class AppModel {
     @ObservationIgnored private var outboxObservation: AnyDatabaseCancellable?
     @ObservationIgnored var attachmentObservationStore: AnyDatabaseCancellable?
     @ObservationIgnored private var outboxTask: Task<Void, Never>?
+    @ObservationIgnored private var pollTask: Task<Void, Never>?
+    /// IDLE pushes new mail at once; this catches connections that died without noticing.
+    static let pollInterval: UInt64 = 120
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var bodyLoads: Set<Int64> = []
     @ObservationIgnored private var markedReadThread: ThreadID?
@@ -203,6 +206,13 @@ final class AppModel {
         keyboard.install(model: self)
         notifications.install(model: self)
         indexOldAttachments()
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: Self.pollInterval * 1_000_000_000)
+                guard let self else { return }
+                for engine in engines.values { Task { await engine.sync() } }
+            }
+        }
         outboxTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.processOutbox()

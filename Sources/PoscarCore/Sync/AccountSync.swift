@@ -109,11 +109,11 @@ public actor AccountSync {
                 for folder in synced {
                     try await syncFolder(folder.path)
                 }
-                try await prefetchBodies(limit: 100)
+                try await prefetchBodies(limit: 100, keepingCurrent: synced)
                 for folder in synced {
                     try await backfill(folder.path, keepingCurrent: synced)
                 }
-                try await prefetchBodies(limit: nil)
+                try await prefetchBodies(limit: nil, keepingCurrent: synced)
             } catch {
                 errorHandler?(error)
             }
@@ -319,11 +319,17 @@ public actor AccountSync {
         }
     }
 
-    private func prefetchBodies(limit: Int?) async throws {
+    /// Downloads bodies of recent mail. Like the backfill, it stops between batches for new mail,
+    /// which would otherwise wait until every body of the last 90 days is in.
+    private func prefetchBodies(limit: Int?, keepingCurrent folders: [FolderRecord]) async throws {
         let accountId = account.id
         let cutoff = Date().addingTimeInterval(-Self.bodyPrefetchDays * 86_400)
         var downloaded = 0
         while limit.map({ downloaded < $0 }) ?? true {
+            if syncRequested {
+                syncRequested = false
+                for folder in folders { try await syncFolder(folder.path) }
+            }
             let failed = failedBodies
             let candidates = try await database.writer.read { db in
                 try MessageRecord.fetchAll(db, sql: """
