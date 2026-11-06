@@ -47,6 +47,9 @@ struct SidebarView: View {
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
         .background(Theme.sidebarTop)
+        // SwiftUI owns the List's scroller style and crashes if it is changed underneath, so the
+        // sidebar simply has none; it still scrolls with the trackpad and wheel.
+        .scrollIndicators(.never)
     }
 
     private var selection: Binding<SidebarItem?> {

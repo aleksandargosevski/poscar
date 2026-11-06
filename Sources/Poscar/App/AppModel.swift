@@ -302,13 +302,7 @@ final class AppModel {
 
     func startEngine(_ account: Account) {
         guard let database else { return }
-        let credentials: CredentialProvider
-        do {
-            credentials = try credentialProvider(for: account)
-        } catch {
-            accountErrors[account.id] = error.localizedDescription
-            return
-        }
+        let credentials = credentialProvider(for: account)
         let engine = AccountSync(account: account, credentials: credentials, database: database)
         engines[account.id] = engine
         let accountID = account.id

@@ -5,28 +5,33 @@ import SwiftUI
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @AppStorage("sidebarWidth") private var sidebarWidth = 240.0
 
     var body: some View {
-        // A plain split instead of NavigationSplitView: on macOS 26 its sidebar floats up under the
-        // title bar, while here the toolbar spans the whole window and the sidebar sits below it.
+        // A plain split instead of NavigationSplitView, whose sidebar floats on macOS 26. The toolbar
+        // is transparent and the backdrop paints both columns up to the top, so the title bar is split
+        // in the sidebar's and the content's colours.
         HStack(spacing: 0) {
             if model.sidebarVisible {
                 SidebarView()
-                    .frame(width: 240)
+                    .frame(width: sidebarWidth)
                     .transition(.move(edge: .leading))
-                Rectangle().fill(Theme.hairline).frame(width: 0.5)
+                SidebarResizeHandle(width: $sidebarWidth)
             }
             ContentArea()
         }
+        .background { WindowBackdrop(sidebarWidth: model.sidebarVisible ? sidebarWidth : 0) }
         .animation(.easeOut(duration: 0.18), value: model.sidebarVisible)
-        .toolbarBackground(.visible, for: .windowToolbar)
-        .toolbarBackground(Theme.barTop, for: .windowToolbar)
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .navigationTitle(model.mailboxTitle)
+        .hidingWindowTitle()
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                CommandButton(command: .toggleSidebar, icon: "sidebar.left", showTitle: false, bordered: false)
+                ToolbarLeading(sidebarWidth: model.sidebarVisible ? sidebarWidth : 0, title: model.mailboxTitle)
             }
-            ToolbarItemGroup(placement: .primaryAction) {
+            // Without the system title nothing pushes these right, so a flexible space does.
+            ToolbarItemGroup(placement: .automatic) {
+                Spacer()
                 CommandButton(command: .refresh, icon: "arrow.clockwise", title: "Check mail", bordered: false)
                 CommandButton(command: .compose, icon: "square.and.pencil", bordered: false)
             }
@@ -48,6 +53,101 @@ struct MainView: View {
         .background(WindowAccessor { window in model.mainWindow = window })
         .onAppear {
             model.openMainWindow = { openWindow(id: "main") }
+        }
+    }
+}
+
+/// Both column colours reaching under the transparent toolbar, plus the line below the content's bar.
+private struct WindowBackdrop: View {
+    let sidebarWidth: CGFloat
+
+    var body: some View {
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                Theme.sidebarTop.frame(width: sidebarWidth)
+                VStack(spacing: 0) {
+                    Theme.barTop.frame(height: geometry.safeAreaInsets.top)
+                    Rectangle().fill(Theme.hairline).frame(height: 0.5)
+                    Theme.canvas
+                }
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
+/// The hairline between sidebar and content, draggable to resize the sidebar.
+private struct SidebarResizeHandle: View {
+    @Binding var width: Double
+    @State private var startWidth: Double?
+
+    static let range = 180.0...420.0
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.hairline)
+            .frame(width: 0.5)
+            .ignoresSafeArea()
+            .overlay {
+                Color.clear
+                    .frame(width: 9)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { value in
+                                let start = startWidth ?? width
+                                startWidth = start
+                                width = min(max(start + value.translation.width, Self.range.lowerBound), Self.range.upperBound)
+                            }
+                            .onEnded { _ in startWidth = nil }
+                    )
+            }
+    }
+}
+
+/// Sidebar toggle over the sidebar, then the folder title lined up with the content below it.
+private struct ToolbarLeading: View {
+    let sidebarWidth: CGFloat
+    let title: String
+    @State private var originX: CGFloat = 80
+
+    var body: some View {
+        HStack(spacing: 0) {
+            CommandButton(command: .toggleSidebar, icon: "sidebar.left", showTitle: false, bordered: false)
+                .frame(width: max(84, sidebarWidth + ThreadListView.margin - originX), alignment: .leading)
+            if #available(macOS 15, *) {
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+            }
+        }
+        .background(GeometryReader { geometry in
+            let x = geometry.frame(in: .global).minX
+            Color.clear
+                .onAppear { record(x) }
+                .onChange(of: x) { _, newX in record(newX) }
+        })
+    }
+
+    /// Toolbar layout must not change state mid-update, so the measured origin is stored afterwards.
+    private func record(_ x: CGFloat) {
+        DispatchQueue.main.async {
+            if abs(originX - x) > 0.5 { originX = x }
+        }
+    }
+}
+
+private extension View {
+    /// The title is drawn by `ToolbarLeading` so it can sit over the content column.
+    @ViewBuilder
+    func hidingWindowTitle() -> some View {
+        if #available(macOS 15, *) {
+            toolbar(removing: .title)
+        } else {
+            self
         }
     }
 }

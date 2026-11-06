@@ -6,12 +6,20 @@ import PoscarCore
 extension AppModel {
     /// How connections of this account log in. The keychain holds the password, or for Google
     /// sign-in the refresh token, which is traded for short-lived access tokens as needed.
-    func credentialProvider(for account: Account) throws -> CredentialProvider {
-        let secret = try Keychain.password(accountID: account.id)
-        guard account.usesGoogleOAuth else { return { .password(secret) } }
+    ///
+    /// The keychain is read when a connection is made, off the main thread: after an update macOS
+    /// asks for access, and that question must not hold up the window.
+    func credentialProvider(for account: Account) -> CredentialProvider {
         let tokens = googleTokens
         let accountID = account.id
-        return { .oauthAccessToken(try await tokens.accessToken(accountID: accountID, refreshToken: secret)) }
+        let usesGoogleOAuth = account.usesGoogleOAuth
+        return {
+            let secret = try await Task.detached(priority: .userInitiated) {
+                try Keychain.password(accountID: accountID)
+            }.value
+            guard usesGoogleOAuth else { return .password(secret) }
+            return .oauthAccessToken(try await tokens.accessToken(accountID: accountID, refreshToken: secret))
+        }
     }
 
     /// Verifies the IMAP and SMTP logins, then stores the account and starts syncing it.
@@ -68,7 +76,7 @@ extension AppModel {
         startEngine(updated)
     }
 
-    nonisolated private static func openInBrowser(_ url: URL) {
+    private nonisolated static let openInBrowser: @Sendable (URL) -> Void = { url in
         DispatchQueue.main.async { NSWorkspace.shared.open(url) }
     }
 
