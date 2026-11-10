@@ -125,6 +125,13 @@ SMTP and sign-in endpoints) and never sends your mail, contacts or usage data an
 - Removing an account deletes its local mail and keychain items. Revoke Google access any time at
   [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 
+## Troubleshooting
+
+Poscar keeps running when its window is closed, so new mail and notifications keep arriving; click
+the Dock icon, the menu bar item or the global shortcut to bring it back, and quit with `⌘Q`.
+Launches, quits (and who asked for them) and window closes are logged to
+`~/Library/Logs/Poscar/poscar.log`. Crash reports are in `~/Library/Logs/DiagnosticReports`.
+
 ## Known limits
 
 - Drafts are not saved: closing the composer asks to discard.
