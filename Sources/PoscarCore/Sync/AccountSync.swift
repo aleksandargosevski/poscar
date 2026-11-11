@@ -31,6 +31,7 @@ public actor AccountSync {
     private var newMailHandler: (@Sendable ([MessageRecord]) -> Void)?
     private var statusHandler: (@Sendable (String?) -> Void)?
     private var errorHandler: (@Sendable (Error) -> Void)?
+    private var checkedHandler: (@Sendable () -> Void)?
 
     static let bodyPrefetchDays: Double = 90
     static let bodyPrefetchMaxSize = 10_000_000
@@ -60,6 +61,12 @@ public actor AccountSync {
         newMailHandler = newMail
         statusHandler = status
         errorHandler = error
+    }
+
+    /// Called once every folder has been checked for new mail, or the check failed; slower work
+    /// (downloading bodies and older mail) may still follow.
+    public func setCheckedHandler(_ handler: @escaping @Sendable () -> Void) {
+        checkedHandler = handler
     }
 
     /// Rows with pending local changes; sync must not overwrite them until they are committed.
@@ -109,6 +116,7 @@ public actor AccountSync {
                 for folder in synced {
                     try await syncFolder(folder.path)
                 }
+                checkedHandler?()
                 try await prefetchBodies(limit: 100, keepingCurrent: synced)
                 for folder in synced {
                     try await backfill(folder.path, keepingCurrent: synced)
@@ -116,6 +124,7 @@ public actor AccountSync {
                 try await prefetchBodies(limit: nil, keepingCurrent: synced)
             } catch {
                 errorHandler?(error)
+                checkedHandler?()
             }
         } while syncRequested
     }

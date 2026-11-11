@@ -37,7 +37,7 @@ struct MainView: View {
             // Without the system title nothing pushes these right, so a flexible space does.
             ToolbarItemGroup(placement: .automatic) {
                 Spacer()
-                CommandButton(command: .refresh, icon: "arrow.clockwise", title: "Check mail", bordered: false)
+                RefreshButton()
                 CommandButton(command: .compose, icon: "square.and.pencil", bordered: false)
             }
         }
@@ -198,6 +198,10 @@ struct ContentArea: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .top) {
+                if model.isRefreshing { RefreshProgressBar().transition(.opacity) }
+            }
+            .animation(.easeOut(duration: 0.2), value: model.isRefreshing)
             ActionFooter()
         }
         .background(Theme.canvas)
@@ -217,6 +221,68 @@ struct ContentArea: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: model.toast)
+    }
+}
+
+/// "Check mail" that turns into a spinning, disabled "Checking…" while accounts are checked.
+struct RefreshButton: View {
+    @Environment(AppModel.self) private var model
+    @State private var angle = 0.0
+
+    var body: some View {
+        Button {
+            model.perform(.refresh)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.clockwise")
+                    .rotationEffect(.degrees(angle))
+                Text(model.isRefreshing ? "Checking…" : "Check mail")
+                    .monospacedDigit()
+                KeyHint(sequence: model.keymap.primary(for: .refresh))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(HintButtonStyle(bordered: false))
+        .disabled(model.isRefreshing)
+        .help("Check for new mail")
+        .onChange(of: model.isRefreshing) { _, refreshing in spin(refreshing) }
+        .onAppear { spin(model.isRefreshing) }
+    }
+
+    private func spin(_ refreshing: Bool) {
+        if refreshing {
+            angle = 0
+            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { angle = 360 }
+        } else {
+            // Replacing the repeating animation with a short one stops it at rest.
+            withAnimation(.easeOut(duration: 0.2)) { angle = 0 }
+        }
+    }
+}
+
+/// A thin indeterminate bar under the toolbar while mail is being checked.
+private struct RefreshProgressBar: View {
+    @State private var phase: CGFloat = -0.35
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            Capsule()
+                .fill(LinearGradient(
+                    colors: [Theme.accent.opacity(0), Theme.accent, Theme.accent.opacity(0)],
+                    startPoint: .leading, endPoint: .trailing
+                ))
+                .frame(width: width * 0.35, height: 2)
+                .offset(x: width * phase)
+        }
+        .frame(height: 2)
+        .clipped()
+        .allowsHitTesting(false)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: false)) { phase = 1 }
+        }
     }
 }
 

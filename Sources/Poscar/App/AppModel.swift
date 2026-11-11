@@ -74,6 +74,9 @@ final class AppModel {
     var paletteIndex = 0
     var toast: Toast?
     var syncStatus: [String: String] = [:]
+    /// Accounts still checking for mail after ⌘R; drives the spinner and the progress bar.
+    var refreshingAccounts: Set<String> = []
+    var isRefreshing: Bool { !refreshingAccounts.isEmpty }
     var accountErrors: [String: String] = [:]
     var keymap = Keymap()
     var keymapWarnings: [String] = []
@@ -171,6 +174,8 @@ final class AppModel {
     @ObservationIgnored var attachmentObservationStore: AnyDatabaseCancellable?
     @ObservationIgnored private var outboxTask: Task<Void, Never>?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    @ObservationIgnored private var newMailDuringRefresh = 0
+    @ObservationIgnored private var refreshStartedAt = Date.distantPast
     /// IDLE pushes new mail at once; this catches connections that died without noticing.
     static let pollInterval: UInt64 = 120
     @ObservationIgnored private var toastTask: Task<Void, Never>?
@@ -318,6 +323,9 @@ final class AppModel {
                     Task { @MainActor in self?.accountErrors[accountID] = error.localizedDescription }
                 }
             )
+            await engine.setCheckedHandler { [weak self] in
+                Task { @MainActor in self?.finishRefresh(accountID) }
+            }
             await engine.start()
         }
     }
@@ -338,13 +346,39 @@ final class AppModel {
     }
 
     func refresh() {
+        guard !isRefreshing else { return }
         accountErrors = [:]
+        newMailDuringRefresh = 0
+        refreshStartedAt = Date()
+        refreshingAccounts = Set(accounts.map(\.id))
         for (id, engine) in engines {
             syncStatus[id] = "Checking for mail…"
             Task { await engine.sync() }
         }
         for account in accounts where engines[account.id] == nil {
             startEngine(account)
+        }
+        // An account that never answers must not leave the spinner running.
+        let started = refreshStartedAt
+        Task {
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            if refreshStartedAt == started, isRefreshing {
+                refreshingAccounts = []
+                showToast("Some accounts did not answer", isError: true)
+            }
+        }
+    }
+
+    private func finishRefresh(_ accountID: String) {
+        guard refreshingAccounts.contains(accountID) else { return }
+        if syncStatus[accountID] == "Checking for mail…" { syncStatus[accountID] = nil }
+        // Keep the spinner up briefly, so a fast check still reads as "checked" rather than a flicker.
+        let remaining = 0.7 - Date().timeIntervalSince(refreshStartedAt)
+        Task {
+            if remaining > 0 { try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000)) }
+            guard refreshingAccounts.remove(accountID) != nil, refreshingAccounts.isEmpty else { return }
+            let count = newMailDuringRefresh
+            showToast(count == 0 ? "No new mail" : count == 1 ? "1 new message" : "\(count) new messages")
         }
     }
 
@@ -362,6 +396,7 @@ final class AppModel {
 
     private func notifyNewMail(_ messages: [MessageRecord], accountID: String) {
         accountErrors[accountID] = nil
+        if isRefreshing { newMailDuringRefresh += messages.count }
         guard let account = account(accountID), account.notificationsEnabled else { return }
         notifications.post(messages, account: account)
     }
