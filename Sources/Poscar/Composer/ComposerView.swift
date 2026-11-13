@@ -50,6 +50,10 @@ struct ComposerView: View {
             }
         }
         .onChange(of: draft.subject) { controller.updateTitle() }
+        .onChange(of: focus) { oldFocus, newFocus in
+            if let old = Self.addressField(oldFocus), old != Self.addressField(newFocus) { draft.fieldLostFocus(old) }
+            draft.activeField = Self.addressField(newFocus)
+        }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             for provider in providers {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -100,25 +104,49 @@ struct ComposerView: View {
     private func addressRow<Accessory: View>(
         _ label: String, field: AddressFieldKind, focusValue: ComposerFocus, @ViewBuilder accessory: () -> Accessory
     ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            fieldRow(label) {
-                TextField("", text: Binding(
-                    get: { draft.text(for: field) },
-                    set: { value in
-                        draft.setText(value, for: field)
-                        draft.updateSuggestions(for: field, database: model.database)
+        let list = draft.list(for: field)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
+                Text(label)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 56, alignment: .trailing)
+                    .padding(.top, 2)
+                FlowLayout(spacing: 5, lineSpacing: 5) {
+                    ForEach(Array(list.addresses.enumerated()), id: \.element.email) { index, address in
+                        RecipientToken(
+                            address: address,
+                            isSelected: draft.selectedToken?.field == field && draft.selectedToken?.index == index,
+                            onRemove: { draft.removeToken(at: index, from: field) }
+                        )
                     }
-                ))
-                .textFieldStyle(.plain)
-                .focused($focus, equals: focusValue)
-                .onChange(of: focus) { _, newFocus in
-                    if newFocus != focusValue, draft.suggestionField == field { draft.suggestions = [] }
+                    TextField("", text: Binding(
+                        get: { draft.list(for: field).draft },
+                        set: { draft.setDraft($0, for: field, database: model.database) }
+                    ))
+                    .textFieldStyle(.plain)
+                    .focused($focus, equals: focusValue)
+                    .frame(minWidth: 140)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture { focus = focusValue }
                 accessory()
             }
-            if draft.suggestionField == field, !draft.suggestions.isEmpty {
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .frame(minHeight: 34)
+            if draft.suggestionField == field, !draft.suggestions.isEmpty, focus == focusValue {
                 suggestionList
             }
+        }
+    }
+
+    private static func addressField(_ focus: ComposerFocus?) -> AddressFieldKind? {
+        switch focus {
+        case .to: .to
+        case .cc: .cc
+        case .bcc: .bcc
+        default: nil
         }
     }
 
@@ -126,6 +154,7 @@ struct ComposerView: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(draft.suggestions.enumerated()), id: \.element.email) { index, contact in
                 HStack {
+                    Avatar(name: contact.name, email: contact.email, size: 20)
                     Text(contact.name.isEmpty ? contact.email : contact.name)
                     if !contact.name.isEmpty {
                         Text(contact.email).foregroundStyle(.secondary)
@@ -137,7 +166,7 @@ struct ComposerView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(index == draft.suggestionIndex ? Color.accentColor.opacity(0.18) : .clear)
+                .background(RoundedRectangle(cornerRadius: 6).fill(index == draft.suggestionIndex ? Theme.selection : .clear))
                 .contentShape(Rectangle())
                 .onTapGesture { draft.acceptSuggestion(at: index) }
             }
@@ -313,5 +342,93 @@ struct BodyEditor: NSViewRepresentable {
             guard let textView = notification.object as? NSTextView else { return }
             text.wrappedValue = textView.string
         }
+    }
+}
+
+/// One recipient: the name (or address) in a pill that can only be removed, never edited.
+private struct RecipientToken: View {
+    let address: EmailAddress
+    let isSelected: Bool
+    let onRemove: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(address.name.isEmpty ? address.email : address.name)
+                .lineLimit(1)
+            Button(action: onRemove) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(isSelected ? .white : .secondary)
+                    .frame(width: 14, height: 14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(hovering || isSelected ? 1 : 0.5)
+            .help("Remove")
+        }
+        .padding(.leading, 9)
+        .padding(.trailing, 4)
+        .padding(.vertical, 2)
+        .foregroundStyle(isSelected ? .white : .primary)
+        .background(Capsule().fill(isSelected ? Theme.accent : Color.primary.opacity(0.07)))
+        .overlay(Capsule().strokeBorder(isSelected ? .clear : Theme.hairline, lineWidth: 0.5))
+        .onHover { hovering = $0 }
+        .help(address.formatted)
+    }
+}
+
+/// Lays children out left to right, wrapping to a new line when they don't fit.
+/// The last child (the text field) takes whatever width is left on its line.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 400
+        let frames = arrange(subviews, width: width)
+        let height = frames.map(\.maxY).max() ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (subview, frame) in zip(subviews, arrange(subviews, width: bounds.width)) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                proposal: ProposedViewSize(width: frame.width, height: frame.height)
+            )
+        }
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [CGRect] {
+        var frames: [CGRect] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        for (index, subview) in subviews.enumerated() {
+            var size = subview.sizeThatFits(.unspecified)
+            size.width = min(size.width, width)
+            if x > 0, x + size.width > width {
+                x = 0
+                y += lineHeight + lineSpacing
+                lineHeight = 0
+            }
+            if index == subviews.count - 1 { size.width = max(size.width, width - x) }
+            frames.append(CGRect(x: x, y: y, width: size.width, height: size.height))
+            x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+        // Centre each item vertically on its line, so the text field lines up with the pills.
+        var result: [CGRect] = []
+        var lineStart = 0
+        for index in frames.indices {
+            let isLineEnd = index == frames.count - 1 || frames[index + 1].minY != frames[index].minY
+            guard isLineEnd else { continue }
+            let line = frames[lineStart...index]
+            let height = line.map(\.height).max() ?? 0
+            result += line.map { $0.offsetBy(dx: 0, dy: (height - $0.height) / 2) }
+            lineStart = index + 1
+        }
+        return result
     }
 }

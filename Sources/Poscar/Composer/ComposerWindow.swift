@@ -23,7 +23,7 @@ final class ComposerManager {
             return
         }
         let draft = ComposerModel.new(account: account, to: to)
-        draft.cc = cc
+        draft.cc = RecipientList(AddressParser.parse(cc))
         draft.showCcBcc = !cc.isEmpty
         draft.subject = subject
         draft.body = body + draft.body
@@ -97,7 +97,7 @@ final class ComposerController: NSWindowController, NSWindowDelegate {
     // MARK: - Keys and commands
 
     func handleKey(_ chord: KeyChord, isTyping: Bool) -> Bool {
-        if draft.handleSuggestionKey(chord) { return true }
+        if draft.handleRecipientKey(chord) { return true }
         if draft.showingSendLater {
             if chord.key == "esc" {
                 draft.showingSendLater = false
