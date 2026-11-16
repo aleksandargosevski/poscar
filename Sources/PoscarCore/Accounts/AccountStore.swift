@@ -52,6 +52,14 @@ public enum PoscarError: LocalizedError, Equatable {
     case timeout(String)
     case invalidInput(String)
 
+    /// The connection broke or stopped answering, as opposed to the server refusing a command.
+    public var isConnectionLoss: Bool {
+        switch self {
+        case .connection, .timeout: true
+        default: false
+        }
+    }
+
     public var errorDescription: String? {
         switch self {
         case .storage(let message): message

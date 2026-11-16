@@ -502,8 +502,17 @@ public actor IMAPSession {
     public func run<T: Sendable>(_ operation: @Sendable (IMAPClient) async throws -> T) async throws -> T {
         await acquire()
         defer { release() }
-        let client = try await connectedClient()
-        return try await operation(client)
+        let (client, reused) = try await connectedClient()
+        do {
+            return try await operation(client)
+        } catch let error as PoscarError where reused && error.isConnectionLoss {
+            // Servers drop idle connections silently (often after sleep or a few quiet hours);
+            // that only shows on the next command, so retry it once on a fresh connection.
+            await client.disconnect()
+            self.client = nil
+            let (fresh, _) = try await connectedClient()
+            return try await operation(fresh)
+        }
     }
 
     public func close() async {
@@ -511,11 +520,11 @@ public actor IMAPSession {
         client = nil
     }
 
-    private func connectedClient() async throws -> IMAPClient {
-        if let client, await client.isConnected { return client }
+    private func connectedClient() async throws -> (client: IMAPClient, reused: Bool) {
+        if let client, await client.isConnected { return (client, true) }
         let fresh = try await makeClient()
         client = fresh
-        return fresh
+        return (fresh, false)
     }
 
     private func acquire() async {

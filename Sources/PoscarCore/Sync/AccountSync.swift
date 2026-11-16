@@ -31,7 +31,7 @@ public actor AccountSync {
     private var newMailHandler: (@Sendable ([MessageRecord]) -> Void)?
     private var statusHandler: (@Sendable (String?) -> Void)?
     private var errorHandler: (@Sendable (Error) -> Void)?
-    private var checkedHandler: (@Sendable () -> Void)?
+    private var checkedHandler: (@Sendable (Bool) -> Void)?
 
     static let bodyPrefetchDays: Double = 90
     static let bodyPrefetchMaxSize = 10_000_000
@@ -63,9 +63,9 @@ public actor AccountSync {
         errorHandler = error
     }
 
-    /// Called once every folder has been checked for new mail, or the check failed; slower work
-    /// (downloading bodies and older mail) may still follow.
-    public func setCheckedHandler(_ handler: @escaping @Sendable () -> Void) {
+    /// Called once every folder has been checked for new mail (`true`), or the check failed
+    /// (`false`); slower work (downloading bodies and older mail) may still follow.
+    public func setCheckedHandler(_ handler: @escaping @Sendable (Bool) -> Void) {
         checkedHandler = handler
     }
 
@@ -116,7 +116,7 @@ public actor AccountSync {
                 for folder in synced {
                     try await syncFolder(folder.path)
                 }
-                checkedHandler?()
+                checkedHandler?(true)
                 try await prefetchBodies(limit: 100, keepingCurrent: synced)
                 for folder in synced {
                     try await backfill(folder.path, keepingCurrent: synced)
@@ -124,7 +124,7 @@ public actor AccountSync {
                 try await prefetchBodies(limit: nil, keepingCurrent: synced)
             } catch {
                 errorHandler?(error)
-                checkedHandler?()
+                checkedHandler?(false)
             }
         } while syncRequested
     }
@@ -523,6 +523,7 @@ public actor AccountSync {
 
     private func idleLoop() async {
         var backoff: UInt64 = 10
+        var isReconnect = false
         while !Task.isCancelled {
             do {
                 let client = try await makeClient()
@@ -535,6 +536,9 @@ public actor AccountSync {
                 }
                 _ = try await client.select("INBOX")
                 backoff = 10
+                // Mail that arrived while the connection was down never triggered IDLE.
+                if isReconnect { Task { await sync() } }
+                isReconnect = true
                 while !Task.isCancelled {
                     if try await client.idle(maxDuration: 24 * 60) {
                         Task { await sync() }

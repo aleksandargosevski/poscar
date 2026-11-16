@@ -323,8 +323,11 @@ final class AppModel {
                     Task { @MainActor in self?.accountErrors[accountID] = error.localizedDescription }
                 }
             )
-            await engine.setCheckedHandler { [weak self] in
-                Task { @MainActor in self?.finishRefresh(accountID) }
+            await engine.setCheckedHandler { [weak self] succeeded in
+                Task { @MainActor in
+                    if succeeded { self?.accountErrors[accountID] = nil }
+                    self?.finishRefresh(accountID)
+                }
             }
             await engine.start()
         }
