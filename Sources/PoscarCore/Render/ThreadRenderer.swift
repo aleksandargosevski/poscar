@@ -6,12 +6,15 @@ public struct RenderableMessage: Sendable {
     public var loadError: String?
     /// JPEG previews of attachments, keyed by attachment id.
     public var thumbnails: [Int: Data]
+    /// Where the message is, such as "Trash", when that is not the mailbox being viewed.
+    public var folderTag: String?
 
-    public init(record: MessageRecord, parsed: ParsedMessage?, loadError: String? = nil, thumbnails: [Int: Data] = [:]) {
+    public init(record: MessageRecord, parsed: ParsedMessage?, loadError: String? = nil, thumbnails: [Int: Data] = [:], folderTag: String? = nil) {
         self.record = record
         self.parsed = parsed
         self.loadError = loadError
         self.thumbnails = thumbnails
+        self.folderTag = folderTag
     }
 }
 
@@ -109,12 +112,14 @@ public enum ThreadRenderer {
             body = "<div class=\"loading\">Loading…</div>"
         }
 
+        let tag = message.folderTag.map { " <span class=\"tag\">\(HTMLText.escape($0))</span>" } ?? ""
+
         let section = """
         <section class="msg\(open ? " open" : "")\(record.seen ? "" : " unread")" id="m\(index)">
         <a class="header" href="\(scheme)://toggle/\(index)">
           <div class="avatar" style="background:\(avatarColor(for: sender.email))">\(HTMLText.escape(initial))</div>
           <div class="meta">
-            <div class="from"><b>\(HTMLText.escape(sender.displayName))</b> <span class="email">\(HTMLText.escape(sender.email))</span></div>
+            <div class="from"><b>\(HTMLText.escape(sender.displayName))</b> <span class="email">\(HTMLText.escape(sender.email))</span>\(tag)</div>
             <div class="to">to \(HTMLText.escape(recipients.joined(separator: ", ")))</div>
             <div class="snippet">\(HTMLText.escape(record.snippet))</div>
           </div>
@@ -294,6 +299,7 @@ public enum ThreadRenderer {
     .meta{flex:1;min-width:0;}
     .from{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px;}
     .email,.to,time{color:var(--muted);font-size:12px;}
+    .tag{font-size:10.5px;font-weight:600;color:var(--muted);border:.5px solid var(--line);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:1px;}
     .to{margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .snippet{display:none;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
     .msg:not(.open) .snippet{display:block;}

@@ -72,18 +72,27 @@ public enum MailQueries {
         return try request.fetchAll(db)
     }
 
-    /// All messages of a thread, newest first, without duplicates copied across folders.
-    public static func threadMessages(_ db: Database, thread: ThreadID, folders: AccountFolders, inTrashOrSpam: Bool) throws -> [MessageRecord] {
-        let trashAndSpam = [folders.path(for: .trash), folders.path(for: .junk)].compactMap { $0 }
-        var request = MessageRecord
+    /// Messages of a thread as seen from `mailbox`, newest first, without duplicates copied across folders.
+    /// Trash and Spam show only their own copies, other mailboxes leave them out, and a search
+    /// (`.everywhere`) falls back to them when the thread exists nowhere else.
+    public static func threadMessages(_ db: Database, thread: ThreadID, folders: AccountFolders, mailbox: MailboxKind) throws -> [MessageRecord] {
+        let trashAndSpam = Set([folders.path(for: .trash), folders.path(for: .junk)].compactMap { $0 })
+        let all = try MessageRecord
             .filter(Column("accountId") == thread.accountId && Column("threadKey") == thread.threadKey && Column("hidden") == false)
             .order(Column("date").desc)
-        request = inTrashOrSpam
-            ? request.filter(trashAndSpam.contains(Column("folder")))
-            : request.filter(!trashAndSpam.contains(Column("folder")))
+            .fetchAll(db)
+        let inTrashOrSpam = all.filter { trashAndSpam.contains($0.folder) }
+        let elsewhere = all.filter { !trashAndSpam.contains($0.folder) }
+
+        let shown: [MessageRecord]
+        switch mailbox {
+        case .trash, .spam: shown = inTrashOrSpam
+        case .everywhere: shown = elsewhere.isEmpty ? inTrashOrSpam : elsewhere
+        default: shown = elsewhere
+        }
 
         var seen = Set<String>()
-        return try request.fetchAll(db).filter { message in
+        return shown.filter { message in
             guard let messageId = message.messageId else { return true }
             return seen.insert(messageId).inserted
         }

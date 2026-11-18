@@ -108,10 +108,10 @@ extension AppModel {
         } else if showingScheduled || showingAttachments {
             showingScheduled = false
             showingAttachments = false
-        } else if activeSearch != nil {
-            clearSearch()
         } else if focus == .reader {
             closeThread()
+        } else if activeSearch != nil {
+            clearSearch()
         } else if !checked.isEmpty {
             checked = []
         }
@@ -142,6 +142,7 @@ extension AppModel {
         let targets = targetThreads
         guard !targets.isEmpty, let database else { return }
         let mailboxKind = mailbox.kind
+        let viewedKind = viewedMailbox.kind
         let removes = action.removesThread(from: mailboxKind) && !showingScheduled
 
         if removes {
@@ -159,7 +160,7 @@ extension AppModel {
                     for thread in targets {
                         guard let accountFolders = foldersByAccount[thread.id.accountId] else { continue }
                         let messages = try MailQueries.threadMessages(
-                            db, thread: thread.id, folders: accountFolders, inTrashOrSpam: mailboxKind.isTrashOrSpam
+                            db, thread: thread.id, folders: accountFolders, mailbox: viewedKind
                         )
                         result[thread.id.accountId, default: []].append(
                             ActionPlanner.plan(action, messages: messages, folders: accountFolders, mailbox: mailboxKind)

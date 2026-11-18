@@ -37,6 +37,8 @@ struct ThreadDetail {
 
     /// Messages are newest first.
     var subject: String { messages.first?.subject ?? "" }
+    /// Set once the first query returned; until then the reader shows a spinner.
+    var isLoaded = false
 
     var focusedMessage: MessageRecord? {
         guard let focusedIndex, messages.indices.contains(focusedIndex) else { return messages.first }
@@ -431,9 +433,12 @@ final class AppModel {
         if detail != nil { loadDetail() }
     }
 
+    /// The mailbox the list shows: the search scope while searching, otherwise the selected mailbox.
+    var viewedMailbox: Mailbox { activeSearch != nil ? searchScope : mailbox }
+
     func observeThreads() {
         guard let database else { return }
-        let mailbox = activeSearch != nil ? searchScope : mailbox
+        let mailbox = viewedMailbox
         let accountFolders = accounts.compactMap { folders[$0.id] }
         let restrictTo = searchResultIDs
         let limit = threadLimit
@@ -585,10 +590,10 @@ final class AppModel {
         if detail?.thread != threadID {
             detail = ThreadDetail(thread: threadID, loadImages: alwaysLoadImages)
         }
-        let inTrashOrSpam = mailbox.kind.isTrashOrSpam
+        let viewedKind = viewedMailbox.kind
         detailObservation = ValueObservation
             .tracking { db in
-                try MailQueries.threadMessages(db, thread: threadID, folders: accountFolders, inTrashOrSpam: inTrashOrSpam)
+                try MailQueries.threadMessages(db, thread: threadID, folders: accountFolders, mailbox: viewedKind)
             }
             .removeDuplicates()
             .start(in: database.writer, scheduling: .immediate) { [weak self] error in
@@ -602,6 +607,7 @@ final class AppModel {
         guard var current = detail, current.thread == thread else { return }
         let isFirstLoad = current.messages.isEmpty
         current.messages = messages
+        current.isLoaded = true
         if isFirstLoad {
             current.initiallyUnread = Set(messages.filter { !$0.seen }.compactMap(\.id))
             expandedMessages = current.initiallyUnread
@@ -665,7 +671,8 @@ final class AppModel {
                 record: shown,
                 parsed: record.id.flatMap { detail.parsed[$0] },
                 loadError: record.id.flatMap { detail.errors[$0] },
-                thumbnails: record.id.flatMap { detail.thumbnails[$0] } ?? [:]
+                thumbnails: record.id.flatMap { detail.thumbnails[$0] } ?? [:],
+                folderTag: folderTag(for: record)
             )
         }
         let output = ThreadRenderer.render(
@@ -683,9 +690,17 @@ final class AppModel {
         let messages = detail.messages.map { message -> String in
             let id = message.id ?? 0
             let state = detail.parsed[id] != nil ? "p" : detail.errors[id] != nil ? "e" : "-"
-            return "\(id)\(state)\(message.snippet.count)"
+            return "\(id)\(state)\(message.snippet.count)\(folderTag(for: message) ?? "")"
         }
         return "\(detail.thread.threadKey)|\(detail.loadImages)|\(expandedMessages.sorted())|" + messages.joined(separator: ",")
+    }
+
+    /// Search shows mail from Trash and Spam too, so those messages say where they are.
+    private func folderTag(for message: MessageRecord) -> String? {
+        guard !viewedMailbox.kind.isTrashOrSpam, let accountFolders = folders[message.accountId] else { return nil }
+        if message.folder == accountFolders.path(for: .trash) { return displayName(for: .trash) }
+        if message.folder == accountFolders.path(for: .junk) { return displayName(for: .spam) }
+        return nil
     }
 
     func toggleMessage(at index: Int) {

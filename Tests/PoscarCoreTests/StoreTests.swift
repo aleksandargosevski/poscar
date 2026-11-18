@@ -103,7 +103,7 @@ import Testing
         let database = try MailDatabase()
         try seed(database)
         let messages = try database.writer.read { db in
-            try MailQueries.threadMessages(db, thread: ThreadID(accountId: "g", threadKey: "t1"), folders: gmailFolders(), inTrashOrSpam: false)
+            try MailQueries.threadMessages(db, thread: ThreadID(accountId: "g", threadKey: "t1"), folders: gmailFolders(), mailbox: .inbox)
         }
         let plan = ActionPlanner.plan(.archive, messages: messages, folders: gmailFolders(), mailbox: .inbox)
         #expect(plan.operations == [.gmailLabels(folder: allMail, uids: [1, 2], add: false, labels: ["\\Inbox"])])
@@ -122,7 +122,7 @@ import Testing
         let database = try MailDatabase()
         try seed(database)
         let messages = try database.writer.read { db in
-            try MailQueries.threadMessages(db, thread: ThreadID(accountId: "g", threadKey: "t1"), folders: gmailFolders(), inTrashOrSpam: false)
+            try MailQueries.threadMessages(db, thread: ThreadID(accountId: "g", threadKey: "t1"), folders: gmailFolders(), mailbox: .inbox)
         }
         #expect(messages.map(\.uid) == [2, 1])
         let star = ActionPlanner.plan(.star, messages: messages, folders: gmailFolders(), mailbox: .inbox)
@@ -135,11 +135,36 @@ import Testing
         let database = try MailDatabase()
         try seed(database)
         let messages = try database.writer.read { db in
-            try MailQueries.threadMessages(db, thread: ThreadID(accountId: "g", threadKey: "t3"), folders: gmailFolders(), inTrashOrSpam: false)
+            try MailQueries.threadMessages(db, thread: ThreadID(accountId: "g", threadKey: "t3"), folders: gmailFolders(), mailbox: .inbox)
         }
         let plan = ActionPlanner.plan(.trash, messages: messages, folders: gmailFolders(), mailbox: .inbox)
         #expect(plan.operations == [.move(folder: allMail, uids: [4], destination: trash)])
         #expect(plan.updated.allSatisfy { $0.hidden })
+    }
+
+    /// Regression: a search hit that lives only in Trash opened as an empty thread and spun forever.
+    @Test func searchOpensThreadsThatAreOnlyInTrash() throws {
+        let database = try MailDatabase()
+        try database.writer.write { db in
+            var trashed = message(uid: 1, thread: "gone", labels: [])
+            trashed.folder = trash
+            try trashed.insert(db)
+            var kept = message(uid: 2, thread: "mixed", labels: [], minutesAgo: 5)
+            var keptCopy = message(uid: 3, thread: "mixed", labels: [], minutesAgo: 1)
+            keptCopy.folder = trash
+            try kept.insert(db)
+            try keptCopy.insert(db)
+        }
+        func uids(_ thread: String, _ mailbox: MailboxKind) throws -> [Int64] {
+            try database.writer.read { db in
+                try MailQueries.threadMessages(db, thread: ThreadID(accountId: "g", threadKey: thread), folders: gmailFolders(), mailbox: mailbox)
+            }.map(\.uid)
+        }
+        #expect(try uids("gone", .inbox) == [])
+        #expect(try uids("gone", .everywhere) == [1])
+        #expect(try uids("gone", .trash) == [1])
+        #expect(try uids("mixed", .everywhere) == [2])
+        #expect(try uids("mixed", .trash) == [3])
     }
 
     @Test func searchesSubjectsAndParticipants() throws {
