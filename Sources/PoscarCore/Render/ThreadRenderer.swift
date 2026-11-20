@@ -95,9 +95,7 @@ public enum ThreadRenderer {
         let record = message.record
         let sender = record.from
         let initial = String(sender.displayName.prefix(1)).uppercased()
-        let recipients = (record.to + record.cc).map { address in
-            address.email.caseInsensitiveCompare(accountEmail) == .orderedSame ? "me" : address.displayName
-        }
+        let recipients = (record.to + record.cc).map { recipientHTML($0, accountEmail: accountEmail) }
 
         var body = ""
         var hasRemote = false
@@ -120,7 +118,7 @@ public enum ThreadRenderer {
           <div class="avatar" style="background:\(avatarColor(for: sender.email))">\(HTMLText.escape(initial))</div>
           <div class="meta">
             <div class="from"><b>\(HTMLText.escape(sender.displayName))</b> <span class="email">\(HTMLText.escape(sender.email))</span>\(tag)</div>
-            <div class="to">to \(HTMLText.escape(recipients.joined(separator: ", ")))</div>
+            <div class="to">to \(recipients.joined(separator: ", "))</div>
             <div class="snippet">\(HTMLText.escape(record.snippet))</div>
           </div>
           <time>\(HTMLText.escape(formatDate(record.date)))</time>
@@ -129,6 +127,14 @@ public enum ThreadRenderer {
         </section>
         """
         return (section, hasRemote)
+    }
+
+    /// "me" or the name, followed by the address in lighter gray, so it is clear which address got the mail.
+    static func recipientHTML(_ address: EmailAddress, accountEmail: String) -> String {
+        let isMe = address.email.caseInsensitiveCompare(accountEmail) == .orderedSame
+        let label = isMe ? "me" : address.displayName
+        guard label != address.email else { return HTMLText.escape(label) }
+        return "\(HTMLText.escape(label)) <span class=\"addr\">\(HTMLText.escape(address.email))</span>"
     }
 
     /// Images and PDFs as preview cards, everything else as compact chips.
@@ -299,6 +305,7 @@ public enum ThreadRenderer {
     .meta{flex:1;min-width:0;}
     .from{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px;}
     .email,.to,time{color:var(--muted);font-size:12px;}
+    .addr{opacity:.65;}
     .tag{font-size:10.5px;font-weight:600;color:var(--muted);border:.5px solid var(--line);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:1px;}
     .to{margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .snippet{display:none;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}

@@ -17,6 +17,15 @@ import Testing
         #expect(!html.contains("class=\"q\""))
     }
 
+    @Test func showsWhichAddressReceivedTheMail() {
+        let me = EmailAddress(name: "Aleksandar", email: "Me@x.com")
+        #expect(ThreadRenderer.recipientHTML(me, accountEmail: "me@x.com") == "me <span class=\"addr\">Me@x.com</span>")
+        let ana = EmailAddress(name: "Ana <B>", email: "ana@x.com")
+        #expect(ThreadRenderer.recipientHTML(ana, accountEmail: "me@x.com") == "Ana &lt;B&gt; <span class=\"addr\">ana@x.com</span>")
+        let bare = EmailAddress(email: "info@x.com")
+        #expect(ThreadRenderer.recipientHTML(bare, accountEmail: "me@x.com") == "info@x.com")
+    }
+
     @Test func addsToggleOnlyForQuotedHTML() {
         func render(_ html: String) -> String {
             var record = MessageRecord.sample
