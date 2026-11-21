@@ -21,13 +21,18 @@ struct AttachmentsView: View {
                     ScrollView {
                         LazyVGrid(columns: columns, spacing: 16) {
                             ForEach(model.attachments) { record in
-                                AttachmentCard(record: record, isSelected: record.id == model.selectedAttachmentID)
+                                AttachmentCard(
+                                    record: record,
+                                    isSelected: record.id == model.selectedAttachmentID,
+                                    onOpen: { model.openAttachment(record) },
+                                    onDownload: { model.downloadAttachment(record) }
+                                )
                                     .id(record.id)
                                     .onTapGesture(count: 2) { model.openAttachment(record) }
                                     .onTapGesture { model.selectedAttachmentID = record.id }
                                     .contextMenu {
                                         Button("Open") { model.openAttachment(record) }
-                                        Button("Show in Finder") { model.revealAttachment(record) }
+                                        Button("Download") { model.downloadAttachment(record) }
                                         Button("Show Message") { model.showMessage(of: record) }
                                     }
                             }
@@ -139,6 +144,9 @@ struct AttachmentsView: View {
 private struct AttachmentCard: View {
     let record: AttachmentRecord
     let isSelected: Bool
+    let onOpen: () -> Void
+    let onDownload: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -147,6 +155,9 @@ private struct AttachmentCard: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: 124)
                 .overlay(alignment: .top) { preview }
+                .overlay(alignment: .bottomTrailing) {
+                    if isHovered { hoverActions }
+                }
                 .clipped()
             Rectangle().fill(Theme.hairline).frame(height: 0.5)
             VStack(alignment: .leading, spacing: 3) {
@@ -172,7 +183,28 @@ private struct AttachmentCard: View {
                 .strokeBorder(isSelected ? Theme.accent : Theme.hairline, lineWidth: isSelected ? 2 : 0.5)
         )
         .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onHover { isHovered = $0 }
         .help(record.subject)
+    }
+
+    private var hoverActions: some View {
+        HStack(spacing: 6) {
+            hoverButton("Open", icon: "arrow.up.forward.square", action: onOpen)
+            hoverButton("Download", icon: "arrow.down.circle", action: onDownload)
+        }
+        .padding(8)
+    }
+
+    private func hoverButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

@@ -308,7 +308,7 @@ struct ActionFooter: View {
     private var primaryAction: some View {
         if model.showingAttachments {
             if let record = model.attachments.first(where: { $0.id == model.selectedAttachmentID }) {
-                ShortcutButton(title: "Show in Finder", icon: "folder", keys: "o") { model.revealAttachment(record) }
+                ShortcutButton(title: "Download", icon: "arrow.down.circle", keys: "o") { model.downloadAttachment(record) }
                 ShortcutButton(title: "Open", icon: "arrow.up.forward.square", keys: "enter") { model.openAttachment(record) }
             }
         } else if model.focus == .reader {

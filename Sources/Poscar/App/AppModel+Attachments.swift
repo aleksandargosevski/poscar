@@ -39,7 +39,7 @@ extension AppModel {
             openAttachment(attachments[current])
             return true
         case "o":
-            revealAttachment(attachments[current])
+            downloadAttachment(attachments[current])
             return true
         default:
             return false
@@ -72,7 +72,7 @@ extension AppModel {
     }
 
     /// Saves the file to Downloads and selects it in Finder.
-    func revealAttachment(_ record: AttachmentRecord) {
+    func downloadAttachment(_ record: AttachmentRecord) {
         selectedAttachmentID = record.id
         Task {
             do {
