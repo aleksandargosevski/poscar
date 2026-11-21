@@ -26,6 +26,19 @@ import Testing
         #expect(ThreadRenderer.recipientHTML(bare, accountEmail: "me@x.com") == "info@x.com")
     }
 
+    @Test func offersOpenAndDownloadForAttachments() {
+        var record = MessageRecord.sample
+        record.id = 7
+        let file = MailAttachment(id: 2, filename: "ponuda.zip", mimeType: "application/zip", data: Data([1]), contentID: nil, isInline: false)
+        let parsed = ParsedMessage(headers: MIMEHeaders(), html: "<p>Hi</p>", text: nil, attachments: [file])
+        let html = ThreadRenderer.render(
+            subject: "S", messages: [RenderableMessage(record: record, parsed: parsed)],
+            expanded: [], loadImages: false, accountEmail: "me@x.com"
+        ).html
+        #expect(html.contains("href=\"poscar://attachment/7/2\">Open</a>"))
+        #expect(html.contains("href=\"poscar://save-attachment/7/2\">Download</a>"))
+    }
+
     @Test func addsToggleOnlyForQuotedHTML() {
         func render(_ html: String) -> String {
             var record = MessageRecord.sample

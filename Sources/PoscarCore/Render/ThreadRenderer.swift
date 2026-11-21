@@ -137,7 +137,7 @@ public enum ThreadRenderer {
         return "\(HTMLText.escape(label)) <span class=\"addr\">\(HTMLText.escape(address.email))</span>"
     }
 
-    /// Images and PDFs as preview cards, everything else as compact chips.
+    /// Images and PDFs as preview cards, everything else as compact chips. Both offer Open and Download.
     private static func attachmentsHTML(_ attachments: [MailAttachment], thumbnails: [Int: Data], messageID: Int64) -> String {
         guard !attachments.isEmpty else { return "" }
         let previewed = attachments.filter { thumbnails[$0.id] != nil }
@@ -147,10 +147,12 @@ public enum ThreadRenderer {
             html += "<div class=\"previews\">"
             for attachment in previewed {
                 let image = thumbnails[attachment.id]!.base64EncodedString()
+                let links = AttachmentLinks(messageID: messageID, attachmentID: attachment.id)
                 html += """
-                <a class="preview" href="\(scheme)://attachment/\(messageID)/\(attachment.id)" title="\(HTMLText.escape(attachment.filename))">\
-                <img src="data:image/jpeg;base64,\(image)" alt="">\
-                <span>\(HTMLText.escape(attachment.filename))<small>\(attachment.sizeDescription)</small></span></a>
+                <div class="preview" title="\(HTMLText.escape(attachment.filename))">\
+                <a class="thumb" href="\(links.open)"><img src="data:image/jpeg;base64,\(image)" alt=""></a>\
+                <span class="name">\(HTMLText.escape(attachment.filename))<small>\(attachment.sizeDescription)</small></span>\
+                \(links.buttons)</div>
                 """
             }
             html += "</div>"
@@ -158,11 +160,28 @@ public enum ThreadRenderer {
         if !others.isEmpty {
             html += "<div class=\"attachments\">"
             for attachment in others {
-                html += "<a class=\"chip\" href=\"\(scheme)://attachment/\(messageID)/\(attachment.id)\">📎 \(HTMLText.escape(attachment.filename)) <span>\(attachment.sizeDescription)</span></a>"
+                let links = AttachmentLinks(messageID: messageID, attachmentID: attachment.id)
+                html += """
+                <div class="chip"><a class="name" href="\(links.open)">📎 \(HTMLText.escape(attachment.filename)) \
+                <span>\(attachment.sizeDescription)</span></a>\(links.buttons)</div>
+                """
             }
             html += "</div>"
         }
         return html
+    }
+
+    /// `poscar://attachment/…` opens the file, `poscar://save-attachment/…` saves it to Downloads.
+    struct AttachmentLinks {
+        let messageID: Int64
+        let attachmentID: Int
+
+        var open: String { "\(scheme)://attachment/\(messageID)/\(attachmentID)" }
+        var save: String { "\(scheme)://save-attachment/\(messageID)/\(attachmentID)" }
+
+        var buttons: String {
+            "<span class=\"actions\"><a href=\"\(open)\">Open</a><a href=\"\(save)\">Download</a></span>"
+        }
     }
 
     private static func bodyDocument(_ parsed: ParsedMessage, index: Int) -> (String, Bool) {
@@ -318,16 +337,22 @@ public enum ThreadRenderer {
     iframe.body{display:block;width:100%;border:0;height:60px;background:#fff;}
     iframe.body.plain{background:transparent;}
     .attachments{display:flex;flex-wrap:wrap;gap:8px;padding:6px 24px 20px;}
-    .chip{border:.5px solid var(--line);border-radius:8px;padding:5px 9px;color:var(--fg);text-decoration:none;font-size:12px;
-      background:var(--card);}
-    .chip span{color:var(--muted);margin-left:4px;}
+    .chip{display:flex;align-items:center;gap:8px;border:.5px solid var(--line);border-radius:8px;padding:5px 6px 5px 9px;
+      font-size:12px;background:var(--card);}
+    .chip .name{color:var(--fg);text-decoration:none;}
+    .chip .name span{color:var(--muted);margin-left:4px;}
+    .actions{display:flex;gap:4px;}
+    .actions a{font-size:11px;font-weight:600;color:var(--muted);text-decoration:none;padding:2px 7px;border-radius:6px;
+      border:.5px solid var(--line);}
+    .actions a:hover{color:var(--accent);border-color:var(--accent);}
     .previews{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;padding:8px 24px 16px;}
-    .preview{display:block;border:.5px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card);color:var(--fg);
-      text-decoration:none;transition:border-color .12s;}
+    .preview{border:.5px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card);color:var(--fg);
+      transition:border-color .12s;}
     .preview:hover{border-color:var(--accent);}
     .preview img{display:block;width:100%;height:118px;object-fit:cover;object-position:top;background:#fff;border-bottom:.5px solid var(--line);}
-    .preview span{display:block;font-size:11.5px;padding:7px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .preview .name{display:block;font-size:11.5px;padding:7px 9px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .preview small{display:block;color:var(--muted);font-size:10.5px;margin-top:1px;}
+    .preview .actions{padding:0 9px 8px;}
     .loading,.error{padding:20px 26px;color:var(--muted);}
     """
 }

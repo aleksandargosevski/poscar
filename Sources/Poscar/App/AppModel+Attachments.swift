@@ -76,14 +76,23 @@ extension AppModel {
         selectedAttachmentID = record.id
         Task {
             do {
-                let attachment = try await loadAttachment(record)
-                let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-                let url = Self.availableURL(for: attachment.filename, in: downloads)
-                try attachment.data.write(to: url)
-                NSWorkspace.shared.activateFileViewerSelecting([url])
+                saveToDownloads(try await loadAttachment(record))
             } catch {
                 showError("Could not save \(record.filename): \(error.localizedDescription)")
             }
+        }
+    }
+
+    /// Saves the file to Downloads without replacing anything there, and selects it in Finder.
+    func saveToDownloads(_ attachment: MailAttachment) {
+        do {
+            let downloads = try FileManager.default.url(for: .downloadsDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            let url = Self.availableURL(for: attachment.filename, in: downloads)
+            try attachment.data.write(to: url, options: .withoutOverwriting)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            showToast("Saved \(url.lastPathComponent) to Downloads")
+        } catch {
+            showError("Could not save \(attachment.filename): \(error.localizedDescription)")
         }
     }
 

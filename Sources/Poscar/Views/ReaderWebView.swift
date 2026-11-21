@@ -147,6 +147,10 @@ struct ReaderWebView: NSViewRepresentable {
                 if parts.count == 2, let rowID = Int64(parts[0]), let attachmentID = Int(parts[1]) {
                     model.openAttachment(messageRowId: rowID, attachmentId: attachmentID)
                 }
+            case "save-attachment":
+                if parts.count == 2, let rowID = Int64(parts[0]), let attachmentID = Int(parts[1]) {
+                    model.saveAttachment(messageRowId: rowID, attachmentId: attachmentID)
+                }
             case "quotes":
                 if let index = parts.first.flatMap(Int.init) { model.reader.run(ThreadRenderer.toggleQuotesScript(index: index)) }
             case "load-images":

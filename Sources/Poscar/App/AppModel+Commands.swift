@@ -260,6 +260,11 @@ extension AppModel {
         open(attachment)
     }
 
+    func saveAttachment(messageRowId: Int64, attachmentId: Int) {
+        guard let attachment = detail?.parsed[messageRowId]?.attachments.first(where: { $0.id == attachmentId }) else { return }
+        saveToDownloads(attachment)
+    }
+
     private func openAllAttachments() {
         guard let detail, let message = detail.focusedMessage, let id = message.id,
               let attachments = detail.parsed[id]?.visibleAttachments, !attachments.isEmpty else {
