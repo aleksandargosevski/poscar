@@ -20,7 +20,11 @@ public struct OutgoingMessage: Codable, Hashable, Sendable {
     public var cc: [EmailAddress]
     public var bcc: [EmailAddress]
     public var subject: String
+    /// Markdown the user wrote, without the signature and quoted text.
     public var body: String
+    public var signature: Signature?
+    /// The replied-to or forwarded message, sent after the signature.
+    public var quotedText: String?
     public var attachments: [OutgoingAttachment]
     public var inReplyTo: String?
     public var references: [String]
@@ -32,6 +36,8 @@ public struct OutgoingMessage: Codable, Hashable, Sendable {
         bcc: [EmailAddress] = [],
         subject: String,
         body: String,
+        signature: Signature? = nil,
+        quotedText: String? = nil,
         attachments: [OutgoingAttachment] = [],
         inReplyTo: String? = nil,
         references: [String] = []
@@ -42,12 +48,18 @@ public struct OutgoingMessage: Codable, Hashable, Sendable {
         self.bcc = bcc
         self.subject = subject
         self.body = body
+        self.signature = signature
+        self.quotedText = quotedText
         self.attachments = attachments
         self.inReplyTo = inReplyTo
         self.references = references
     }
 
     public var allRecipients: [EmailAddress] { to + cc + bcc }
+
+    public var content: MessageBody {
+        MessageBody(markdown: body, signature: signature, quotedText: quotedText)
+    }
 }
 
 public enum MessageBuilder {
@@ -68,7 +80,7 @@ public enum MessageBuilder {
         }
         headers.append(("X-Mailer", "Poscar"))
 
-        let alternative = alternativePart(for: message.body)
+        let alternative = alternativePart(for: message.content)
         let body: String
         if message.attachments.isEmpty {
             body = alternative
@@ -91,10 +103,10 @@ public enum MessageBuilder {
         "\(UUID().uuidString.lowercased())@\(domain)"
     }
 
-    static func alternativePart(for markdown: String) -> String {
+    static func alternativePart(for content: MessageBody) -> String {
         let boundary = makeBoundary()
-        let plain = quotedPrintable(normalizeNewlines(markdown))
-        let html = quotedPrintable(normalizeNewlines(MarkdownRenderer.html(from: markdown)))
+        let plain = quotedPrintable(normalizeNewlines(content.plainText))
+        let html = quotedPrintable(normalizeNewlines(content.html))
         return """
         Content-Type: multipart/alternative; boundary="\(boundary)"\r
         \r

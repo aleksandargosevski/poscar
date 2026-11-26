@@ -4,17 +4,25 @@ import Markdown
 /// Turns what the user typed in the composer into the HTML alternative of an outgoing message.
 public enum MarkdownRenderer {
     public static func html(from markdown: String) -> String {
+        document(fragment(from: markdown))
+    }
+
+    public static func fragment(from markdown: String) -> String {
         var rewriter = HardLineBreaks()
         let document = Document(parsing: markdown)
         let rewritten = rewriter.visit(document) ?? document
-        let body = HTMLFormatter.format(rewritten)
+        return HTMLFormatter.format(rewritten)
             .replacingOccurrences(
                 of: "<blockquote>",
                 with: "<blockquote style=\"margin:0 0 0 .8ex;border-left:2px solid #ccc;padding-left:1ex;color:#555\">"
             )
-        return """
+    }
+
+    /// Wraps an HTML fragment in the page every outgoing message uses.
+    public static func document(_ fragment: String) -> String {
+        """
         <!DOCTYPE html><html><head><meta charset="utf-8"></head>\
-        <body><div style="font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45">\(body)</div></body></html>
+        <body><div style="font-family:-apple-system,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45">\(fragment)</div></body></html>
         """
     }
 

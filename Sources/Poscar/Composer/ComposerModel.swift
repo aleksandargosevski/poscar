@@ -25,6 +25,9 @@ final class ComposerModel {
     var bcc = RecipientList()
     var subject = ""
     var body = ""
+    var signature: Signature?
+    var quotedText: String?
+    var showingQuote = false
     var attachments: [OutgoingAttachment] = []
     var showCcBcc = false
     var inReplyTo: String?
@@ -47,6 +50,7 @@ final class ComposerModel {
     var selectedToken: (field: AddressFieldKind, index: Int)?
 
     @ObservationIgnored private var initialSnapshot = ""
+    @ObservationIgnored private var signatureRemoved = false
 
     init(accountId: String) {
         self.accountId = accountId
@@ -60,7 +64,23 @@ final class ComposerModel {
 
     private var snapshot: String {
         let recipients = [to, cc, bcc].map { list in list.addresses.map(\.email).joined(separator: ",") + "|" + list.draft }
-        return (recipients + [subject, body, attachments.map(\.filename).joined()]).joined(separator: "\u{1}")
+        let extras = "\(signature != nil)|\(quotedText != nil)"
+        return (recipients + [subject, body, extras, attachments.map(\.filename).joined()]).joined(separator: "\u{1}")
+    }
+
+    var content: MessageBody {
+        MessageBody(markdown: body, signature: signature, quotedText: quotedText)
+    }
+
+    /// The signature follows the From account, unless the user removed it.
+    func switchAccount(to account: Account) {
+        guard !signatureRemoved else { return }
+        signature = account.composedSignature
+    }
+
+    func removeSignature() {
+        signature = nil
+        signatureRemoved = true
     }
 
     var windowTitle: String {
@@ -196,6 +216,8 @@ final class ComposerModel {
             to: to, cc: cc, bcc: bcc,
             subject: subject,
             body: body,
+            signature: signature,
+            quotedText: quotedText,
             attachments: attachments,
             inReplyTo: inReplyTo,
             references: references
@@ -218,15 +240,10 @@ final class ComposerModel {
 
     // MARK: - Drafts from existing mail
 
-    static func signatureBlock(_ account: Account) -> String {
-        let signature = account.signature.trimmingCharacters(in: .whitespacesAndNewlines)
-        return signature.isEmpty ? "" : "\n\n-- \n\(signature)"
-    }
-
     static func new(account: Account, to: String = "") -> ComposerModel {
         let draft = ComposerModel(accountId: account.id)
         draft.to = RecipientList(AddressParser.parse(to))
-        draft.body = signatureBlock(account)
+        draft.signature = account.composedSignature
         draft.initialFocus = to.isEmpty ? .to : .body
         draft.cursorAtStart = true
         draft.markClean()
@@ -240,6 +257,7 @@ final class ComposerModel {
         let replyTargets = isMine ? message.to : (AddressParser.parse(message.replyTo).nonEmpty ?? [message.from])
         let originalText = String((parsed?.plainText ?? message.snippet).prefix(20_000))
         let date = message.date.formatted(date: .abbreviated, time: .shortened)
+        draft.signature = account.composedSignature
 
         switch mode {
         case .reply, .replyAll:
@@ -259,16 +277,16 @@ final class ComposerModel {
             draft.showCcBcc = !copies.isEmpty
             draft.subject = prefixed(message.subject, with: "Re:")
             let quoted = originalText.components(separatedBy: "\n").map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")
-            draft.body = signatureBlock(account) + "\n\nOn \(date), \(message.from.formatted) wrote:\n\n" + quoted
+            draft.quotedText = "On \(date), \(message.from.formatted) wrote:\n\n" + quoted
             draft.inReplyTo = message.messageId
             draft.references = message.referenceIDs + [message.messageId].compactMap { $0 }
             draft.replyToRowId = message.id
             draft.initialFocus = .body
         case .forward:
             draft.subject = prefixed(message.subject, with: "Fwd:")
-            draft.body = signatureBlock(account) + """
-
-
+            // Forwarding is about the forwarded message, so it starts open.
+            draft.showingQuote = true
+            draft.quotedText = """
             ---------- Forwarded message ----------
             From: \(message.from.formatted)
             Date: \(date)
@@ -297,6 +315,9 @@ final class ComposerModel {
         draft.showCcBcc = !message.cc.isEmpty || !message.bcc.isEmpty
         draft.subject = message.subject
         draft.body = message.body
+        draft.signature = message.signature
+        draft.signatureRemoved = message.signature == nil
+        draft.quotedText = message.quotedText
         draft.attachments = message.attachments
         draft.inReplyTo = message.inReplyTo
         draft.references = message.references

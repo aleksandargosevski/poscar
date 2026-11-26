@@ -178,10 +178,11 @@ private struct AccountEditor: View {
                 .onChange(of: draft.customColor) { model.setColor(of: draft.id, index: draft.colorIndex, custom: draft.customColor) }
                 Toggle("Notifications for new mail", isOn: $draft.notificationsEnabled)
             }
-            Section("Signature (Markdown)") {
-                TextEditor(text: $draft.signature)
-                    .font(.body)
-                    .frame(height: 80)
+            Section("Signature") {
+                SignatureEditor(source: $draft.signature, format: Binding(
+                    get: { draft.signatureFormat ?? .markdown },
+                    set: { draft.signatureFormat = $0 }
+                ))
             }
             Section("Sign-in") {
                 if draft.usesGoogleOAuth {
@@ -283,6 +284,101 @@ private struct AccountEditor: View {
             }
             isSaving = false
         }
+    }
+}
+
+/// The signature is written in one format; the other code tab shows what is derived from it.
+private struct SignatureEditor: View {
+    @Binding var source: String
+    @Binding var format: Signature.Format
+    @State private var tab: Tab = .markdown
+    @State private var confirmingMarkdown = false
+
+    enum Tab: String, CaseIterable {
+        case markdown = "Markdown"
+        case html = "HTML"
+        case preview = "Preview"
+    }
+
+    private var signature: Signature { Signature(source: source, format: format) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("", selection: $tab) {
+                ForEach(Tab.allCases, id: \.self) { tab in
+                    Label(tab.rawValue, systemImage: isEditable(tab) ? "pencil" : "eye").tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            switch tab {
+            case .markdown where format == .markdown, .html where format == .html:
+                BodyEditor(
+                    text: $source, focusOnAppear: false, cursorAtStart: false,
+                    font: .monospacedSystemFont(ofSize: 12, weight: .regular),
+                    inset: NSSize(width: 4, height: 6), checksSpelling: format == .markdown
+                )
+                .frame(height: 130)
+                note(format == .markdown
+                    ? "Sent as HTML rendered from Markdown, and as the Markdown text for plain-text mail apps."
+                    : "Sent as this HTML, and as its text for plain-text mail apps.")
+            case .markdown:
+                derived(signature.plainText)
+                HStack {
+                    note("This signature is written in HTML. Plain-text mail apps show the text above.")
+                    Spacer()
+                    Button("Write in Markdown…") { confirmingMarkdown = true }
+                }
+            case .html:
+                derived(signature.html)
+                HStack {
+                    note("Generated from Markdown.")
+                    Spacer()
+                    Button("Edit as HTML") {
+                        source = signature.html
+                        format = .html
+                    }
+                }
+            case .preview:
+                if signature.isEmpty {
+                    note("No signature.").frame(height: 130)
+                } else {
+                    HTMLSnippet(html: signature.html, maxHeight: 220)
+                }
+            }
+        }
+        .onAppear { tab = format == .html ? .html : .markdown }
+        .confirmationDialog("Write the signature in Markdown?", isPresented: $confirmingMarkdown) {
+            Button("Convert to Markdown", role: .destructive) {
+                source = signature.plainText
+                format = .markdown
+                tab = .markdown
+            }
+        } message: {
+            Text("The signature becomes its plain text. Links, images and styling from the HTML are lost.")
+        }
+    }
+
+    private func isEditable(_ tab: Tab) -> Bool {
+        (tab == .markdown && format == .markdown) || (tab == .html && format == .html)
+    }
+
+    private func derived(_ text: String) -> some View {
+        ScrollView {
+            Text(text.isEmpty ? " " : text)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(6)
+        }
+        .frame(height: 130)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 }
 

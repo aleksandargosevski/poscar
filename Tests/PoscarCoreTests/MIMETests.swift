@@ -158,4 +158,32 @@ import Testing
         let html = MarkdownRenderer.html(from: "Pozdrav,\nAleksandar")
         #expect(html.contains("Pozdrav,<br />"))
     }
+
+    @Test func sendsMarkdownSignatureBetweenBodyAndQuote() {
+        let content = MessageBody(
+            markdown: "Hvala!\n\n",
+            signature: Signature(source: "**Aleksandar**\n", format: .markdown),
+            quotedText: "On Monday, Ana wrote:\n\n> Zdravo"
+        )
+        #expect(content.plainText == "Hvala!\n\n-- \n**Aleksandar**\n\nOn Monday, Ana wrote:\n\n> Zdravo")
+        let html = content.html
+        let body = html.range(of: "Hvala!")!.lowerBound
+        let signature = html.range(of: "<strong>Aleksandar</strong>")!.lowerBound
+        let quote = html.range(of: "<blockquote")!.lowerBound
+        #expect(body < signature && signature < quote)
+    }
+
+    @Test func sendsHTMLSignatureAsIsWithTextFallback() {
+        let signature = Signature(source: "<table><tr><td><b>Aleksandar</b><br>Godacode</td></tr></table>", format: .html)
+        let content = MessageBody(markdown: "", signature: signature)
+        #expect(content.html.contains("<table><tr><td><b>Aleksandar</b><br>Godacode</td></tr></table>"))
+        #expect(content.plainText == "-- \nAleksandar\nGodacode")
+    }
+
+    @Test func decodesOutboxMessagesSavedBeforeSignatures() throws {
+        let saved = #"{"from":{"name":"","email":"a@example.com"},"to":[],"cc":[],"bcc":[],"subject":"Hi","body":"Text","attachments":[],"references":[]}"#
+        let message = try JSONDecoder().decode(OutgoingMessage.self, from: Data(saved.utf8))
+        #expect(message.signature == nil)
+        #expect(message.content.plainText == "Text")
+    }
 }

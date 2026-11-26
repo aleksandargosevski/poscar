@@ -23,7 +23,7 @@ struct ComposerView: View {
             header
             Divider()
             if draft.showingPreview {
-                MarkdownPreview(markdown: draft.body)
+                MessagePreview(content: draft.content)
             } else {
                 BodyEditor(text: $draft.body, focusOnAppear: draft.initialFocus == .body, cursorAtStart: draft.cursorAtStart)
                     .onDisappear {
@@ -31,6 +31,9 @@ struct ComposerView: View {
                         draft.initialFocus = .body
                         draft.cursorAtStart = false
                     }
+                if draft.signature != nil || draft.quotedText != nil {
+                    signatureAndQuote
+                }
             }
             if !draft.attachments.isEmpty {
                 Divider()
@@ -50,6 +53,9 @@ struct ComposerView: View {
             }
         }
         .onChange(of: draft.subject) { controller.updateTitle() }
+        .onChange(of: draft.accountId) { _, id in
+            if let account = model.account(id) { draft.switchAccount(to: account) }
+        }
         .onChange(of: focus) { oldFocus, newFocus in
             if let old = Self.addressField(oldFocus), old != Self.addressField(newFocus) { draft.fieldLostFocus(old) }
             draft.activeField = Self.addressField(newFocus)
@@ -186,6 +192,46 @@ struct ComposerView: View {
         .frame(minHeight: 34)
     }
 
+    /// Shown rendered under the editor, in the order they are sent.
+    private var signatureAndQuote: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let signature = draft.signature {
+                HStack(alignment: .top, spacing: 6) {
+                    HTMLSnippet(html: signature.html, maxHeight: 160)
+                    removeButton("Remove signature") { draft.removeSignature() }
+                }
+            }
+            if let quotedText = draft.quotedText {
+                HStack(spacing: 6) {
+                    Button {
+                        draft.showingQuote.toggle()
+                    } label: {
+                        Label(draft.showingQuote ? "Hide quoted text" : "Show quoted text", systemImage: "ellipsis")
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                    }
+                    .buttonStyle(HintButtonStyle())
+                    Spacer()
+                    removeButton("Remove quoted text") { draft.quotedText = nil }
+                }
+                if draft.showingQuote {
+                    HTMLSnippet(html: MarkdownRenderer.fragment(from: quotedText), maxHeight: 260)
+                        .padding(.trailing, 22)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 10)
+    }
+
+    private func removeButton(_ help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
     private var attachmentStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
@@ -300,6 +346,9 @@ struct BodyEditor: NSViewRepresentable {
     @Binding var text: String
     var focusOnAppear: Bool
     var cursorAtStart: Bool
+    var font: NSFont = .systemFont(ofSize: 14)
+    var inset = NSSize(width: 14, height: 12)
+    var checksSpelling = true
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text)
@@ -312,12 +361,12 @@ struct BodyEditor: NSViewRepresentable {
         textView.isRichText = false
         textView.importsGraphics = false
         textView.allowsUndo = true
-        textView.font = .systemFont(ofSize: 14)
-        textView.textContainerInset = NSSize(width: 14, height: 12)
+        textView.font = font
+        textView.textContainerInset = inset
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
-        textView.isContinuousSpellCheckingEnabled = true
+        textView.isContinuousSpellCheckingEnabled = checksSpelling
         textView.string = text
         if cursorAtStart { textView.setSelectedRange(NSRange(location: 0, length: 0)) }
         if focusOnAppear {

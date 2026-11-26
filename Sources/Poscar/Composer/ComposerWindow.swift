@@ -26,7 +26,7 @@ final class ComposerManager {
         draft.cc = RecipientList(AddressParser.parse(cc))
         draft.showCcBcc = !cc.isEmpty
         draft.subject = subject
-        draft.body = body + draft.body
+        draft.body = body
         draft.markClean()
         open(draft)
     }

@@ -51,6 +51,8 @@ public struct Account: Codable, Identifiable, Hashable, Sendable {
     /// A hex colour such as `#f97316` that overrides `colorIndex` when set.
     public var customColor: String?
     public var signature: String
+    /// Missing in accounts saved before HTML signatures existed, which were all Markdown.
+    public var signatureFormat: Signature.Format?
     public var notificationsEnabled: Bool
     /// Missing in accounts saved before Google sign-in existed, which all used passwords.
     public var authMethod: AuthMethod?
@@ -67,6 +69,7 @@ public struct Account: Codable, Identifiable, Hashable, Sendable {
         smtp: ServerEndpoint,
         colorIndex: Int = 0,
         signature: String = "",
+        signatureFormat: Signature.Format = .markdown,
         notificationsEnabled: Bool = true,
         authMethod: AuthMethod = .password
     ) {
@@ -79,11 +82,18 @@ public struct Account: Codable, Identifiable, Hashable, Sendable {
         self.smtp = smtp
         self.colorIndex = colorIndex
         self.signature = signature
+        self.signatureFormat = signatureFormat
         self.notificationsEnabled = notificationsEnabled
         self.authMethod = authMethod
     }
 
     public var isGmail: Bool { kind == .gmail }
+
+    /// The signature new mail starts with, or nil when none is set.
+    public var composedSignature: Signature? {
+        let content = Signature(source: signature, format: signatureFormat ?? .markdown)
+        return content.isEmpty ? nil : content
+    }
 
     /// Domain used for generated Message-IDs.
     public var domain: String {
