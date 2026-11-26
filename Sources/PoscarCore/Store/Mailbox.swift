@@ -87,6 +87,18 @@ public struct AccountFolders: Sendable, Hashable {
         return account && (isGmail ? gmailCondition(kind) : imapCondition(kind))
     }
 
+    /// The messages a listed thread is summarised from. Received-mail mailboxes take in the whole
+    /// conversation except drafts, so the user's replies count; the others keep to themselves.
+    func conversationCondition(for kind: MailboxKind) -> SQLExpression {
+        switch kind {
+        case .inbox, .starred, .label, .archive:
+            let notDraft = Column("draft") == false && (isGmail ? !hasLabel("\\Draft") : Column("folder") != (path(for: .drafts) ?? "\u{0}"))
+            return condition(for: .archive) && notDraft
+        case .sent, .drafts, .spam, .trash, .everywhere:
+            return condition(for: kind)
+        }
+    }
+
     private func gmailCondition(_ kind: MailboxKind) -> SQLExpression {
         let allMail = Column("folder") == (allMailPath ?? "")
         switch kind {

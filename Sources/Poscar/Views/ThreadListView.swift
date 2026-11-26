@@ -254,10 +254,16 @@ struct ThreadRow: View {
                 if thread.hasAttachments {
                     Image(systemName: "paperclip").foregroundStyle(.secondary)
                 }
+                if repliedLast {
+                    Image(systemName: "arrowshape.turn.up.left.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help("You replied last")
+                }
                 (Text(latest.subject.isEmpty ? "(no subject)" : latest.subject)
                     .fontWeight(thread.isUnread ? .semibold : .regular)
                     .foregroundStyle(thread.isUnread ? Color.primary : Color.secondary)
-                 + Text(latest.snippet.isEmpty ? "" : " - " + latest.snippet).foregroundStyle(.secondary))
+                 + Text(snippet).foregroundStyle(.secondary))
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -309,8 +315,30 @@ struct ThreadRow: View {
         model.mailbox.kind == .sent || model.mailbox.kind == .drafts
     }
 
+    private var myEmail: String {
+        model.account(thread.latest.accountId)?.email.lowercased() ?? ""
+    }
+
+    private func isMe(_ address: EmailAddress) -> Bool {
+        address.email.lowercased() == myEmail
+    }
+
+    /// In received mail, the newest message being the user's means the other side is up next.
+    private var repliedLast: Bool {
+        !isOutgoing && (isMe(thread.latest.from) || thread.latest.hasLabel("\\Sent"))
+    }
+
+    private var snippet: String {
+        let text = thread.latest.snippet
+        if repliedLast { return text.isEmpty ? " - You" : " - You: " + text }
+        return text.isEmpty ? "" : " - " + text
+    }
+
+    /// The other side of the conversation, even when the user wrote last.
     private var avatarAddress: EmailAddress {
-        isOutgoing ? (thread.latest.to.first ?? thread.latest.from) : thread.latest.from
+        if isOutgoing { return thread.latest.to.first ?? thread.latest.from }
+        guard repliedLast else { return thread.latest.from }
+        return thread.participants.last { !isMe($0) } ?? thread.latest.to.first ?? thread.latest.from
     }
 
     private var participants: String {
@@ -318,8 +346,8 @@ struct ThreadRow: View {
             let names = thread.latest.to.map(\.displayName)
             return "To: " + (names.isEmpty ? "(no recipients)" : names.joined(separator: ", "))
         }
-        let names = thread.participants.isEmpty ? [thread.latest.from.displayName] : thread.participants
-        return names.joined(separator: ", ")
+        let senders = thread.participants.isEmpty ? [thread.latest.from] : thread.participants
+        return senders.map { isMe($0) ? "me" : $0.displayName }.joined(separator: ", ")
     }
 
     /// "3m ago" and "5h ago" for today, otherwise a short date.

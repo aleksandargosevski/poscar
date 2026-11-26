@@ -46,12 +46,34 @@ import Testing
         #expect(threads[1].messageCount == 2)
         #expect(threads[1].unreadCount == 1)
         #expect(threads[1].latest.uid == 2)
-        #expect(threads[1].participants.sorted() == ["Sender 1", "Sender 2"])
+        #expect(threads[1].participants.map(\.name) == ["Sender 1", "Sender 2"])
 
         let label = try database.writer.read { db in
             try MailQueries.threads(db, mailbox: Mailbox(accountId: "g", kind: .label("Posao")), accounts: [gmailFolders()], limit: 50)
         }
         #expect(label.map(\.latest.threadKey) == ["t3"])
+    }
+
+    @Test func inboxThreadsIncludeRepliesFromSent() throws {
+        let database = try MailDatabase()
+        try seed(database)
+        try database.writer.write { db in
+            var reply = message(uid: 5, thread: "t1", labels: ["\\Sent"], minutesAgo: 0)
+            reply.fromName = "Me"
+            reply.fromEmail = "me@x.com"
+            try reply.insert(db)
+            var draft = message(uid: 6, thread: "t1", labels: ["\\Draft"])
+            draft.draft = true
+            try draft.insert(db)
+        }
+        let threads = try database.writer.read { db in
+            try MailQueries.threads(db, mailbox: .unifiedInbox, accounts: [gmailFolders()], limit: 50)
+        }
+        // The reply moves the thread to the top, and the Sent-only thread t2 stays out of the Inbox.
+        #expect(threads.map(\.latest.threadKey) == ["t1", "t3"])
+        #expect(threads[0].messageCount == 3)
+        #expect(threads[0].latest.uid == 5)
+        #expect(threads[0].participants.map(\.email) == ["s1@x.com", "s2@x.com", "me@x.com"])
     }
 
     /// Regression: the OR between accounts once escaped the per-thread filter and repeated one thread.

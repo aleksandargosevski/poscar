@@ -7,7 +7,8 @@ public struct ThreadSummary: Identifiable, Hashable, Sendable, FetchableRecord {
     public var unreadCount: Int
     public var isFlagged: Bool
     public var hasAttachments: Bool
-    public var participants: [String]
+    /// Senders in the order they first wrote, one per address.
+    public var participants: [EmailAddress]
 
     public var id: ThreadID { ThreadID(accountId: latest.accountId, threadKey: latest.threadKey) }
     public var isUnread: Bool { unreadCount > 0 }
@@ -18,8 +19,11 @@ public struct ThreadSummary: Identifiable, Hashable, Sendable, FetchableRecord {
         unreadCount = row["unreadCount"]
         isFlagged = row["anyFlagged"]
         hasAttachments = row["anyAttachment"]
-        let names: String = row["participantList"] ?? ""
-        participants = names.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        let senders: String = row["participantList"] ?? ""
+        participants = senders.split(separator: "\u{1E}").map { sender in
+            let parts = sender.split(separator: "\u{1F}", maxSplits: 1, omittingEmptySubsequences: false)
+            return EmailAddress(name: parts.count > 1 ? String(parts[1]) : "", email: String(parts[0]))
+        }
     }
 }
 
@@ -35,6 +39,8 @@ public struct ThreadID: Hashable, Codable, Sendable {
 
 public enum MailQueries {
     /// Threads of a mailbox, newest first. `restrictTo` limits the result to search hits.
+    /// A thread is listed when one of its messages is in the mailbox, but its count, latest message
+    /// and senders cover the whole conversation, so replies from Sent show in the Inbox like in Gmail.
     public static func threads(
         _ db: Database,
         mailbox: Mailbox,
@@ -49,22 +55,32 @@ public enum MailQueries {
         if let messageIDs {
             condition = condition && messageIDs.contains(Column("id"))
         }
+        let context = relevant.map { $0.conversationCondition(for: mailbox.kind) }.joined(operator: .or) || condition
+        // Copies of one message in several folders count once.
         let request = SQLRequest<ThreadSummary>(literal: """
-            SELECT latest.*, thread.messageCount, thread.unreadCount, thread.anyFlagged, thread.anyAttachment, thread.participantList
+            SELECT latest.*, thread.messageCount, thread.unreadCount, thread.anyFlagged, thread.anyAttachment,
+                (SELECT group_concat(sender, char(30)) FROM (
+                    SELECT lower(fromEmail) || char(31) || MAX(fromName) AS sender, MIN(date) AS firstDate
+                    FROM message
+                    WHERE accountId = thread.accountId AND threadKey = thread.threadKey AND hidden = 0 AND (\(context))
+                    GROUP BY lower(fromEmail)
+                    ORDER BY firstDate
+                )) AS participantList
             FROM (
-                SELECT accountId, threadKey, MAX(date) AS lastDate, COUNT(*) AS messageCount,
-                       SUM(CASE WHEN seen THEN 0 ELSE 1 END) AS unreadCount,
-                       MAX(flagged) AS anyFlagged, MAX(hasAttachments) AS anyAttachment,
-                       GROUP_CONCAT(DISTINCT CASE WHEN fromName = '' THEN fromEmail ELSE fromName END) AS participantList
-                FROM message
-                WHERE hidden = 0 AND (\(condition))
+                SELECT accountId, threadKey, MAX(message.date) AS lastDate,
+                       COUNT(DISTINCT COALESCE(message.messageId, 'row:' || message.id)) AS messageCount,
+                       COUNT(DISTINCT CASE WHEN message.seen THEN NULL ELSE COALESCE(message.messageId, 'row:' || message.id) END) AS unreadCount,
+                       MAX(message.flagged) AS anyFlagged, MAX(message.hasAttachments) AS anyAttachment
+                FROM (SELECT DISTINCT accountId, threadKey FROM message WHERE hidden = 0 AND (\(condition))) AS member
+                JOIN message USING (accountId, threadKey)
+                WHERE message.hidden = 0 AND (\(context))
                 GROUP BY accountId, threadKey
                 ORDER BY lastDate DESC
                 LIMIT \(limit)
             ) AS thread
             JOIN message AS latest ON latest.id = (
                 SELECT id FROM message
-                WHERE accountId = thread.accountId AND threadKey = thread.threadKey AND hidden = 0 AND (\(condition))
+                WHERE accountId = thread.accountId AND threadKey = thread.threadKey AND hidden = 0 AND (\(context))
                 ORDER BY date DESC LIMIT 1
             )
             ORDER BY thread.lastDate DESC
